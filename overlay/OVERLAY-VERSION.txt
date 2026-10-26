@@ -1,0 +1,3 @@
+base: upstream akiralereal/iptv v4.49.2
+local: kuaishou-live 迁回 + PushPlus 推送通道 + menableMigu=false
+updated: 2026-10-26
