@@ -13,6 +13,12 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  # 定时跟进上游：上游发版不会通知我们，只能自己定期重建。
+  # UTC 18:00 = 北京 02:00，UTC 04:00 = 北京 12:00。
+  # 便携部署默认 04:30（北京）检查更新，正好接住前一天中午和凌晨两次构建。
+  schedule:
+    - cron: '0 18 * * *'
+    - cron: '0 4 * * *'
 
 env:
   REGISTRY: ghcr.io
