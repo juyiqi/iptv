@@ -1,3 +1,4 @@
-base: upstream akiralereal/iptv v4.49.2
-local: kuaishou-live 迁回 + PushPlus 推送通道 + menableMigu=false
-updated: 2026-10-26
+base: upstream akiralereal/iptv v4.51.2
+local: kuaishou-live 迁回（仅 2 行注册）+ PushPlus 推送通道 + 抖音风控修复（Cookie + 节流 + 验证页识别）
+follow: jiangmen 跟随上游取消注册（官方直播 CDN 持续 502）
+updated: 2026-10-28
