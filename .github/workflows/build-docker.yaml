@@ -124,3 +124,47 @@ jobs:
 
       - name: Inspect image
         run: docker buildx imagetools inspect "$IMAGE:latest"
+
+  # 镜像之外再产出一个「源码发行包」，供 Windows 便携部署做定时自动更新：
+  # 目标机只下载几 MB 的源码 tar.gz，保留自己的 node_modules / runtime / data。
+  package:
+    name: 打包源码发行包
+    needs: merge
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout 本仓库（叠加层）
+        uses: actions/checkout@v6
+
+      - name: 拉取上游源码并叠加改动
+        run: |
+          git clone --depth 1 "$UPSTREAM" upstream
+          cp -a overlay/. upstream/
+          rm -rf upstream/.git upstream/node_modules upstream/data
+          cd upstream
+          if ! grep -q "kuaishou-live" extractors/registry.js; then
+            echo "::error::叠加后 registry.js 里没有 kuaishou-live，上游结构可能变了"
+            exit 1
+          fi
+
+      - name: 打 tar.gz
+        run: |
+          VERSION=$(node -p "require('./upstream/package.json').version")
+          echo "UPSTREAM_VERSION=$VERSION" >> "$GITHUB_ENV"
+          tar -czf "iptv-src-$VERSION.tar.gz" -C upstream .
+          ls -lh "iptv-src-$VERSION.tar.gz"
+
+      - name: 发布 Release（同版本重复构建则覆盖资源）
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v$UPSTREAM_VERSION"
+          ASSET="iptv-src-$UPSTREAM_VERSION.tar.gz"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ASSET" --clobber
+          else
+            gh release create "$TAG" "$ASSET" \
+              --title "$TAG" \
+              --notes "上游 akiralereal/iptv v$UPSTREAM_VERSION + 快手直播模块（自动构建，供便携部署定时更新）"
+          fi
