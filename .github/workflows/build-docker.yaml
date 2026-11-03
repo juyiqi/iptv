@@ -2,7 +2,9 @@
 #
 # 本仓库不放完整源码（上游 1000+ 文件），只放「叠加层」：
 #   overlay/ 里的文件会在构建时覆盖到上游 akiralereal/iptv 之上。
-# 当前叠加内容 = 快手直播模块（手动房间 + 分类两种模式）。
+# registry.js 不在叠加之列（那会随上游增删模块而腐烂）：
+#   构建时由 overlay/patches/patch-registry.mjs 在上游最新 registry 上
+#   注入 kuaishou 两行，并校验全部 import 指向真实存在的文件。
 #
 # 产物：ghcr.io/<owner>/iptv:latest 和 ghcr.io/<owner>/iptv:v<上游版本号>
 # 平台：linux/amd64 + linux/arm64（各用原生 runner，不走 QEMU）
@@ -52,10 +54,8 @@ jobs:
           git clone --depth 1 "$UPSTREAM" upstream
           cp -a overlay/. upstream/
           cd upstream
-          if ! grep -q "kuaishou-live" extractors/registry.js; then
-            echo "::error::叠加后 registry.js 里没有 kuaishou-live，上游结构可能变了"
-            exit 1
-          fi
+          # 注入 kuaishou 并校验所有 import 都指向真实文件（上游删模块在这里拦截）
+          node patches/patch-registry.mjs
 
       - name: Login to GHCR
         uses: docker/login-action@v4
@@ -149,15 +149,37 @@ jobs:
           cp -a overlay/. upstream/
           rm -rf upstream/.git upstream/node_modules upstream/data
           cd upstream
-          if ! grep -q "kuaishou-live" extractors/registry.js; then
-            echo "::error::叠加后 registry.js 里没有 kuaishou-live，上游结构可能变了"
+          # 注入 kuaishou 并校验所有 import 都指向真实文件（上游删模块在这里拦截）
+          node patches/patch-registry.mjs
+
+      - name: 启动冒烟测试（服务起不来的包不许发布）
+        run: |
+          cd upstream
+          # 只装运行时依赖；跳过 puppeteer 的 Chromium 下载（启动用不到）
+          PUPPETEER_SKIP_DOWNLOAD=true npm install --omit=dev --no-audit --no-fund --loglevel=error
+          mkdir -p /tmp/smoke-data
+          mdataDir=/tmp/smoke-data mport=19999 menableMigu=false node app.js > /tmp/smoke.log 2>&1 &
+          APP_PID=$!
+          OK=0
+          for i in $(seq 1 40); do
+            sleep 1
+            if curl -fsS -o /dev/null http://127.0.0.1:19999/ 2>/dev/null; then OK=1; break; fi
+            if ! kill -0 $APP_PID 2>/dev/null; then break; fi
+          done
+          kill $APP_PID 2>/dev/null || true
+          if [ "$OK" != "1" ]; then
+            echo "::error::启动冒烟测试失败：app.js 没能在 40 秒内监听 19999 端口"
+            tail -50 /tmp/smoke.log
             exit 1
           fi
+          echo "冒烟测试通过：服务已在 19999 端口监听"
 
       - name: 打 tar.gz
         run: |
           VERSION=$(node -p "require('./upstream/package.json').version")
           echo "UPSTREAM_VERSION=$VERSION" >> "$GITHUB_ENV"
+          # 冒烟测试时装过依赖，打进包之前必须再清一次
+          rm -rf upstream/node_modules upstream/data upstream/.git
           tar -czf "iptv-src-$VERSION.tar.gz" -C upstream .
           ls -lh "iptv-src-$VERSION.tar.gz"
 
